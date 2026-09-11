@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import io
+import re
 
 from uuid import uuid4
 from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault, Update, constants
