@@ -488,10 +488,14 @@ class ChatGPTTelegramBot:
             logging.info('Vision coming from group chat, not pinged and didn\'t trigger lucky reaction, ignoring...')
             return
 
-        if lucky_react and not prompt:
-            prompt = "React to this image or sticker naturally and briefly as an engaged chat participant in character."
+        if not prompt:
+            prompt = (
+                "You are an active conversational chat participant. "
+                "Do NOT describe or explain what is in the image or sticker. "
+                "Instead, react naturally and casually in 1 short sentence as if a friend just sent it in a group chat."
+            )
 
-        if prompt:
+        if prompt and is_pinged:
             prompt = clean_bot_mention(self.config, prompt, context.bot.username or '')
 
         attachment = update.message.effective_attachment
