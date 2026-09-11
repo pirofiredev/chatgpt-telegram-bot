@@ -5,6 +5,7 @@ import logging
 import os
 import io
 import re
+import random
 
 from uuid import uuid4
 from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault, Update, constants
@@ -60,6 +61,7 @@ class ChatGPTTelegramBot:
         self.budget_limit_message = localized_text('budget_limit', bot_language)
         self.usage = {}
         self.last_message = {}
+        self.last_answered_user = {}  # chat_id -> user_id of last user answered by bot
         self.inline_queries_cache = {}
 
     async def help(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -473,12 +475,21 @@ class ChatGPTTelegramBot:
             return
 
         chat_id = update.effective_chat.id
+        user_id = update.message.from_user.id
         prompt = update.message.caption or (update.message.text if update.message.text else None)
 
         is_pinged = is_bot_pinged(self.config, update, context, prompt)
-        if is_group_chat(update) and self.config['ignore_group_vision'] and not is_pinged:
-            logging.info('Vision coming from group chat and not pinged, ignoring...')
+        
+        # 1/2 chance to react if user was actively chatting with the bot
+        is_active_chatting = (self.last_answered_user.get(chat_id) == user_id)
+        lucky_react = is_active_chatting and (random.random() < 0.5)
+
+        if is_group_chat(update) and self.config['ignore_group_vision'] and not is_pinged and not lucky_react:
+            logging.info('Vision coming from group chat, not pinged and didn\'t trigger lucky reaction, ignoring...')
             return
+
+        if lucky_react and not prompt:
+            prompt = "React to this image or sticker naturally and briefly as an engaged chat participant in character."
 
         if prompt:
             prompt = clean_bot_mention(self.config, prompt, context.bot.username or '')
@@ -486,6 +497,8 @@ class ChatGPTTelegramBot:
         attachment = update.message.effective_attachment
         if isinstance(attachment, list) and len(attachment) > 0:
             image = attachment[-1]
+        elif update.message.sticker:
+            image = update.message.sticker.thumbnail or update.message.sticker
         elif hasattr(attachment, 'thumbnail') and attachment.thumbnail:
             image = attachment.thumbnail
         elif hasattr(attachment, 'file_id'):
@@ -807,6 +820,7 @@ class ChatGPTTelegramBot:
                     if tokens != 'not_finished':
                         total_tokens = int(tokens)
 
+                self.last_answered_user[chat_id] = user_id
             else:
                 async def _reply():
                     nonlocal total_tokens
@@ -840,6 +854,7 @@ class ChatGPTTelegramBot:
 
                 await wrap_with_indicator(update, context, _reply, constants.ChatAction.TYPING)
 
+            self.last_answered_user[chat_id] = user_id
             add_chat_request_to_usage_tracker(self.usage, self.config, user_id, total_tokens)
 
         except Exception as e:
@@ -1116,7 +1131,7 @@ class ChatGPTTelegramBot:
             'chat', self.prompt, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)
         )
         application.add_handler(MessageHandler(
-            filters.PHOTO | filters.Document.IMAGE,
+            filters.PHOTO | filters.Document.IMAGE | filters.Sticker.ALL,
             self.vision))
         application.add_handler(MessageHandler(
             filters.AUDIO | filters.VOICE | filters.Document.AUDIO |
