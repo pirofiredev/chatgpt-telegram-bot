@@ -1165,7 +1165,9 @@ class ChatGPTTelegramBot:
         modes_data = self.config.get('modes_data', {})
         for m_key in modes_data:
             def make_handler(k):
-                return lambda u, c: self.switch_mode(u, c, k)
+                async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+                    await self.switch_mode(update, context, k)
+                return handler
             application.add_handler(CommandHandler(m_key.lower(), make_handler(m_key)))
 
         application.add_handler(CommandHandler(
