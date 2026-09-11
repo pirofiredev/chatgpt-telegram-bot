@@ -17,6 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 
 from utils import is_direct_result, encode_image, decode_image
 from plugin_manager import PluginManager
+from memory import extract_facts, save_facts, load_facts
 
 # Models can be found here: https://platform.openai.com/docs/models/overview
 # Models gpt-3.5-turbo-0613 and  gpt-3.5-turbo-16k-0613 will be deprecated on June 13, 2024
@@ -112,6 +113,7 @@ class OpenAIHelper:
         self.conversations: dict[int: list] = {}  # {chat_id: history}
         self.conversations_vision: dict[int: bool] = {}  # {chat_id: is_vision}
         self.last_updated: dict[int: datetime] = {}  # {chat_id: last_update_timestamp}
+        self.pool = None  # asyncpg pool, set externally if Supabase is configured
 
     def get_conversation_stats(self, chat_id: int) -> tuple[int, int]:
         """
@@ -123,15 +125,16 @@ class OpenAIHelper:
             self.reset_chat_history(chat_id)
         return len(self.conversations[chat_id]), self.__count_tokens(self.conversations[chat_id])
 
-    async def get_chat_response(self, chat_id: int, query: str) -> tuple[str, str]:
+    async def get_chat_response(self, chat_id: int, query: str, user_id: int = None) -> tuple[str, str]:
         """
         Gets a full response from the GPT model.
         :param chat_id: The chat ID
         :param query: The query to send to the model
+        :param user_id: Telegram user ID for memory (optional)
         :return: The answer from the model and the number of tokens used
         """
         plugins_used = ()
-        response = await self.__common_get_chat_response(chat_id, query)
+        response = await self.__common_get_chat_response(chat_id, query, user_id=user_id)
         if self.config['enable_functions'] and not self.conversations_vision[chat_id]:
             response, plugins_used = await self.__handle_function_call(chat_id, response)
             if is_direct_result(response):
@@ -164,17 +167,21 @@ class OpenAIHelper:
         elif show_plugins_used:
             answer += f"\n\n---\n🔌 {', '.join(plugin_names)}"
 
+        if user_id:
+            asyncio.create_task(self._maybe_extract_facts(user_id, query, answer))
+
         return answer, response.usage.total_tokens
 
-    async def get_chat_response_stream(self, chat_id: int, query: str):
+    async def get_chat_response_stream(self, chat_id: int, query: str, user_id: int = None):
         """
         Stream response from the GPT model.
         :param chat_id: The chat ID
         :param query: The query to send to the model
+        :param user_id: Telegram user ID for memory (optional)
         :return: The answer from the model and the number of tokens used, or 'not_finished'
         """
         plugins_used = ()
-        response = await self.__common_get_chat_response(chat_id, query, stream=True)
+        response = await self.__common_get_chat_response(chat_id, query, stream=True, user_id=user_id)
         if self.config['enable_functions'] and not self.conversations_vision[chat_id]:
             response, plugins_used = await self.__handle_function_call(chat_id, response, stream=True)
             if is_direct_result(response):
@@ -202,6 +209,9 @@ class OpenAIHelper:
         elif show_plugins_used:
             answer += f"\n\n---\n🔌 {', '.join(plugin_names)}"
 
+        if user_id:
+            asyncio.create_task(self._maybe_extract_facts(user_id, query, answer))
+
         yield answer, tokens_used
 
     @retry(
@@ -210,17 +220,23 @@ class OpenAIHelper:
         wait=wait_fixed(20),
         stop=stop_after_attempt(3)
     )
-    async def __common_get_chat_response(self, chat_id: int, query: str, stream=False):
+    async def __common_get_chat_response(self, chat_id: int, query: str, stream=False, user_id: int = None):
         """
         Request a response from the GPT model.
         :param chat_id: The chat ID
         :param query: The query to send to the model
+        :param user_id: Telegram user ID for memory fact injection
         :return: The answer from the model and the number of tokens used
         """
         bot_language = self.config['bot_language']
         try:
             if chat_id not in self.conversations or self.__max_age_reached(chat_id):
-                self.reset_chat_history(chat_id)
+                if user_id and self.pool:
+                    facts = await load_facts(self.pool, user_id)
+                    content = self.get_chat_prompt(chat_id, user_facts=facts)
+                    self.reset_chat_history(chat_id, content=content)
+                else:
+                    self.reset_chat_history(chat_id)
 
             self.last_updated[chat_id] = datetime.datetime.now()
 
@@ -635,15 +651,43 @@ class OpenAIHelper:
         self.conversations[chat_id] = [{"role": "assistant" if self.config['model'] in O_MODELS else "system", "content": content}]
         self.conversations_vision[chat_id] = False
 
-    def get_chat_prompt(self, chat_id) -> str:
+    async def reset_chat_history_for_user(self, chat_id, user_id: int):
+        """Resets history, injecting fresh facts from DB."""
+        facts = await load_facts(self.pool, user_id) if self.pool else {}
+        content = self.get_chat_prompt(chat_id, user_facts=facts)
+        self.reset_chat_history(chat_id, content=content)
+
+    async def _maybe_extract_facts(self, user_id: int, user_msg: str, bot_msg: str):
+        """Fire-and-forget: extract facts from exchange and persist to DB."""
+        if not self.pool:
+            return
+        model = self.config.get('fallback_model') or self.config['model']
+        facts = await extract_facts(self.client, model, user_msg, bot_msg)
+        if facts:
+            await save_facts(self.pool, user_id, facts)
+            logging.info(f"[memory] extracted for user {user_id}: {facts}")
+            content = self.get_chat_prompt(chat_id)
+        self.conversations[chat_id] = [{"role": "assistant" if self.config['model'] in O_MODELS else "system", "content": content}]
+        self.conversations_vision[chat_id] = False
+
+    def get_chat_prompt(self, chat_id, user_facts: dict = None) -> str:
         """
         Gets the system prompt for the chat, accounting for active chat mode if set.
+        Appends known user facts if provided.
         """
         if hasattr(self, 'chat_modes') and chat_id in self.chat_modes:
             mode_key = self.chat_modes[chat_id]
             if hasattr(self, 'modes_data') and mode_key in self.modes_data:
-                return self.modes_data[mode_key].get('prompt', self.config['assistant_prompt'])
-        return self.config['assistant_prompt']
+                base = self.modes_data[mode_key].get('prompt', self.config['assistant_prompt'])
+            else:
+                base = self.config['assistant_prompt']
+        else:
+            base = self.config['assistant_prompt']
+
+        if user_facts:
+            facts_text = "\n".join(f"- {k}: {v}" for k, v in user_facts.items())
+            base = f"{base}\n\nЧто известно о пользователе:\n{facts_text}"
+        return base
 
     def set_chat_mode(self, chat_id, mode_key: str):
         """

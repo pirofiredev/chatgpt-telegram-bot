@@ -1,15 +1,18 @@
 import json
 import logging
 import os
+import asyncio
 
+import asyncpg
 from dotenv import load_dotenv
 
 from plugin_manager import PluginManager
 from openai_helper import OpenAIHelper, default_max_tokens, are_functions_available
 from telegram_bot import ChatGPTTelegramBot
+from memory import CREATE_TABLE_SQL
 
 
-def main():
+async def _async_main():
     # Read .env file
     load_dotenv()
 
@@ -110,7 +113,7 @@ def main():
         'plugins': os.environ.get('PLUGINS', '').split(',')
     }
 
-    # Setup and run ChatGPT and Telegram bot
+    # Setup ChatGPT and Telegram bot
     plugin_manager = PluginManager(config=plugin_config)
     openai_helper = OpenAIHelper(config=openai_config, plugin_manager=plugin_manager)
 
@@ -125,8 +128,24 @@ def main():
         except Exception as e:
             logging.error(f"Failed to parse MODES_JSON: {e}")
 
+    # Connect to Supabase if configured
+    db_url = os.environ.get('SUPABASE_DB_URL', '').strip()
+    if db_url:
+        try:
+            pool = await asyncpg.create_pool(db_url)
+            async with pool.acquire() as conn:
+                await conn.execute(CREATE_TABLE_SQL)
+            openai_helper.pool = pool
+            logging.info("Connected to Supabase; user_facts table is ready.")
+        except Exception as e:
+            logging.error(f"Failed to connect to Supabase: {e}. Memory features disabled.")
+
     telegram_bot = ChatGPTTelegramBot(config=telegram_config, openai=openai_helper)
     telegram_bot.run()
+
+
+def main():
+    asyncio.run(_async_main())
 
 
 if __name__ == '__main__':
