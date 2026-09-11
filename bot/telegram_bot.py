@@ -54,6 +54,12 @@ class ChatGPTTelegramBot:
         if self.config.get('enable_tts_generation', False):
             self.commands.append(BotCommand(command='tts', description=localized_text('tts_description', bot_language)))
 
+        # If custom modes are imported, register a command for each mode
+        modes_data = self.config.get('modes_data', {})
+        for mode_key, mode_info in modes_data.items():
+            desc = mode_info.get('description', f"Switch to {mode_info.get('title', mode_key)} mode")[:256]
+            self.commands.append(BotCommand(command=mode_key.lower(), description=desc))
+
         self.group_commands = [BotCommand(
             command='chat', description=localized_text('chat_description', bot_language)
         )] + self.commands
@@ -235,6 +241,29 @@ class ChatGPTTelegramBot:
         await update.effective_message.reply_text(
             message_thread_id=get_thread_id(update),
             text=localized_text('reset_done', self.config['bot_language'])
+        )
+
+    async def switch_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE, mode_key: str):
+        """
+        Switches the bot's mode for the current chat.
+        """
+        if not await self.check_allowed_and_within_budget(update, context):
+            return
+
+        chat_id = update.effective_chat.id
+        modes_data = self.config.get('modes_data', {})
+        mode_info = modes_data.get(mode_key, {})
+        title = mode_info.get('title', mode_key.capitalize())
+
+        self.openai.set_chat_mode(chat_id, mode_key)
+        logging.info(f"Chat {chat_id} switched to mode: '{mode_key}' ({title})")
+
+        msg = f"✨ **Mode switched to {title}**\n\n_{mode_info.get('description', '')}_"
+        await update.effective_message.reply_text(
+            message_thread_id=get_thread_id(update),
+            reply_to_message_id=get_reply_to_message_id(self.config, update),
+            text=msg,
+            parse_mode=constants.ParseMode.MARKDOWN
         )
 
     async def image(self, update: Update, context: ContextTypes.DEFAULT_TYPE, query: str = None):
@@ -1131,6 +1160,14 @@ class ChatGPTTelegramBot:
         application.add_handler(CommandHandler('start', self.help))
         application.add_handler(CommandHandler('stats', self.stats))
         application.add_handler(CommandHandler('resend', self.resend))
+
+        # Register dynamic handlers for each custom mode command (e.g. /aggressive, /chill, /normal)
+        modes_data = self.config.get('modes_data', {})
+        for m_key in modes_data:
+            def make_handler(k):
+                return lambda u, c: self.switch_mode(u, c, k)
+            application.add_handler(CommandHandler(m_key.lower(), make_handler(m_key)))
+
         application.add_handler(CommandHandler(
             'chat', self.prompt, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)
         )

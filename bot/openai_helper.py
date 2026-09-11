@@ -631,9 +631,29 @@ class OpenAIHelper:
         Resets the conversation history.
         """
         if content == '':
-            content = self.config['assistant_prompt']
+            content = self.get_chat_prompt(chat_id)
         self.conversations[chat_id] = [{"role": "assistant" if self.config['model'] in O_MODELS else "system", "content": content}]
         self.conversations_vision[chat_id] = False
+
+    def get_chat_prompt(self, chat_id) -> str:
+        """
+        Gets the system prompt for the chat, accounting for active chat mode if set.
+        """
+        if hasattr(self, 'chat_modes') and chat_id in self.chat_modes:
+            mode_key = self.chat_modes[chat_id]
+            if hasattr(self, 'modes_data') and mode_key in self.modes_data:
+                return self.modes_data[mode_key].get('prompt', self.config['assistant_prompt'])
+        return self.config['assistant_prompt']
+
+    def set_chat_mode(self, chat_id, mode_key: str):
+        """
+        Switches the mode for the specific chat and resets its system message.
+        """
+        if not hasattr(self, 'chat_modes'):
+            self.chat_modes = {}
+        self.chat_modes[chat_id] = mode_key
+        prompt = self.get_chat_prompt(chat_id)
+        self.reset_chat_history(chat_id, content=prompt)
 
     def __max_age_reached(self, chat_id) -> bool:
         """
