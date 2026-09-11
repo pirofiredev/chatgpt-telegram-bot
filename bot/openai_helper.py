@@ -261,6 +261,7 @@ class OpenAIHelper:
                     common_args['function_call'] = 'auto'
 
             try:
+                logging.info(f"Generating chat completion using model: '{common_args['model']}' (stream={stream})")
                 return await self.client.chat.completions.create(**common_args)
             except Exception as e:
                 fallback = self.config.get('fallback_model')
@@ -353,9 +354,12 @@ class OpenAIHelper:
             return url
 
         if 'pollinations' in image_model.lower() or image_model.lower() in ('free', 'flux'):
-            return _build_pollinations_url(prompt), '1024x1024'
+            url = _build_pollinations_url(prompt)
+            logging.info(f"Generating image using Pollinations model: '{pollinations_model}' (URL: {url})")
+            return url, '1024x1024'
 
         try:
+            logging.info(f"Generating image using OpenAI/DALL-E model: '{self.config['image_model']}'")
             response = await self.client.images.generate(
                 prompt=prompt,
                 n=1,
@@ -373,9 +377,11 @@ class OpenAIHelper:
                 )
 
             return response.data[0].url, self.config['image_size']
-        except Exception:
+        except Exception as e:
             # Fallback to Pollinations
-            return _build_pollinations_url(prompt), '1024x1024'
+            url = _build_pollinations_url(prompt)
+            logging.warning(f"Image generation failed with '{self.config['image_model']}' ({e}). Falling back to Pollinations model: '{pollinations_model}'")
+            return url, '1024x1024'
 
     async def generate_speech(self, text: str) -> tuple[any, int]:
         """
