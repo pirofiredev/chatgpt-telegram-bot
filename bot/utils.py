@@ -5,6 +5,7 @@ import itertools
 import json
 import logging
 import os
+import re
 import base64
 
 import telegram
@@ -76,6 +77,70 @@ def is_group_chat(update: Update) -> bool:
         constants.ChatType.GROUP,
         constants.ChatType.SUPERGROUP
     ]
+
+
+def is_bot_pinged(config: dict, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str = None) -> bool:
+    """
+    Checks if the bot was pinged/mentioned or directly replied to in a group chat.
+    In private chats, always returns True.
+    """
+    if not is_group_chat(update):
+        return True
+
+    msg = update.effective_message
+    if not msg:
+        return False
+
+    bot = context.bot
+    bot_id = bot.id
+    bot_username = (bot.username or '').lower()
+
+    # 1. Direct reply to bot's message
+    if msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.id == bot_id:
+        return True
+
+    # 2. Check entities (mentions) in text or caption
+    entities = (msg.entities or ()) + (msg.caption_entities or ())
+    raw_content = msg.text or msg.caption or ''
+    for entity in entities:
+        if entity.type == MessageEntity.MENTION:
+            mention_text = raw_content[entity.offset:entity.offset + entity.length].lower()
+            if bot_username and mention_text == f'@{bot_username}':
+                return True
+        elif entity.type == MessageEntity.TEXT_MENTION:
+            if entity.user and entity.user.id == bot_id:
+                return True
+
+    # 3. Check content text / caption for mention or trigger keyword
+    content = text if text is not None else raw_content
+    if content:
+        content_lower = content.lower()
+        if bot_username and f'@{bot_username}' in content_lower:
+            return True
+        trigger_keyword = config.get('group_trigger_keyword', '')
+        if trigger_keyword and content_lower.startswith(trigger_keyword.lower()):
+            return True
+        if content_lower.startswith('/chat'):
+            return True
+
+    return False
+
+
+def clean_bot_mention(config: dict, text: str, bot_username: str = '') -> str:
+    """
+    Removes bot mention (@bot_username), /chat command, or trigger keyword from the beginning of prompt.
+    """
+    if not text:
+        return ''
+    cleaned = text
+    if bot_username:
+        cleaned = re.sub(rf'@{re.escape(bot_username)}\b', '', cleaned, flags=re.IGNORECASE).strip()
+    trigger = config.get('group_trigger_keyword', '')
+    if trigger and cleaned.lower().startswith(trigger.lower()):
+        cleaned = cleaned[len(trigger):].strip()
+    if cleaned.lower().startswith('/chat'):
+        cleaned = cleaned[5:].strip()
+    return cleaned
 
 
 def split_into_chunks(text: str, chunk_size: int = 4096) -> list[str]:

@@ -360,6 +360,37 @@ class OpenAIHelper:
         except Exception as e:
             raise Exception(f"⚠️ _{localized_text('error', bot_language)}._ ⚠️\n{str(e)}") from e
 
+    async def generate_video(self, prompt: str) -> str:
+        """
+        Generates a video from the given prompt.
+        :param prompt: The prompt to send to the video generation model
+        :return: The video URL
+        """
+        bot_language = self.config['bot_language']
+        model = self.config.get('video_model', 'sora')
+        endpoints = ["/videos/generations", "/video/generations"]
+        last_error = None
+
+        for endpoint in endpoints:
+            try:
+                res = await self.client.post(
+                    endpoint,
+                    body={"prompt": prompt, "model": model},
+                    cast_to=dict
+                )
+                if isinstance(res, dict):
+                    data = res.get("data", [])
+                    if data and isinstance(data, list) and len(data) > 0 and "url" in data[0]:
+                        return data[0]["url"]
+                    if "url" in res:
+                        return res["url"]
+            except Exception as e:
+                last_error = e
+                continue
+
+        error_detail = str(last_error) if last_error else localized_text('try_again', bot_language)
+        raise Exception(f"⚠️ _{localized_text('error', bot_language)}._ ⚠️\n{error_detail}")
+
     async def generate_speech(self, text: str) -> tuple[any, int]:
         """
         Generates an audio from the given text using TTS model.
@@ -699,27 +730,19 @@ class OpenAIHelper:
         """
         image_file = io.BytesIO(image_bytes)
         image = Image.open(image_file)
-        model = self.config['vision_model']
-        if model not in GPT_4_VISION_MODELS:
-            raise NotImplementedError(f"""count_tokens_vision() is not implemented for model {model}.""")
-        
         w, h = image.size
         if w > h: w, h = h, w
-        # this computation follows https://platform.openai.com/docs/guides/vision and https://openai.com/pricing#gpt-4-turbo
         base_tokens = 85
-        detail = self.config['vision_detail']
+        detail = self.config.get('vision_detail', 'auto')
         if detail == 'low':
             return base_tokens
-        elif detail == 'high' or detail == 'auto': # assuming worst cost for auto
+        else:
             f = max(w / 768, h / 2048)
             if f > 1:
                 w, h = int(w / f), int(h / f)
             tw, th = (w + 511) // 512, (h + 511) // 512
             tiles = tw * th
-            num_tokens = base_tokens + tiles * 170
-            return num_tokens
-        else:
-            raise NotImplementedError(f"""unknown parameter detail={detail} for model {model}.""")
+            return base_tokens + tiles * 170
 
     # No longer works as of July 21st 2023, as OpenAI has removed the billing API
     # def get_billing_current_month(self):
