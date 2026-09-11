@@ -54,6 +54,7 @@ def default_max_tokens(model: str) -> int:
         return 4096
     elif model in O_MODELS:
         return 4096
+    return 4096
 
 
 def are_functions_available(model: str) -> bool:
@@ -640,9 +641,7 @@ class OpenAIHelper:
                 return 32_768
             else:
                 return 65_536
-        raise NotImplementedError(
-            f"Max tokens for model {self.config['model']} is not implemented yet."
-        )
+        return 128_000
 
     # https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
     def __count_tokens(self, messages) -> int:
@@ -657,11 +656,9 @@ class OpenAIHelper:
         except KeyError:
             encoding = tiktoken.get_encoding("o200k_base")
 
-        if model in GPT_ALL_MODELS:
-            tokens_per_message = 3
-            tokens_per_name = 1
-        else:
-            raise NotImplementedError(f"""num_tokens_from_messages() is not implemented for model {model}.""")
+        # Fallback to standard 3 tokens per message for custom/unknown models
+        tokens_per_message = 3
+        tokens_per_name = 1
         num_tokens = 0
         for message in messages:
             num_tokens += tokens_per_message
