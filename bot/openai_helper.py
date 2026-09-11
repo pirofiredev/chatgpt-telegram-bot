@@ -365,10 +365,19 @@ class OpenAIHelper:
                 actual_model = resp.headers.get('x-model-requested') or resp.headers.get('model') or pollinations_model
                 if resp.status_code == 200:
                     logging.info(f"Pollinations successfully generated image (Status: 200, Model: '{actual_model}')")
-                    return str(resp.url)
+                    img_bytes = resp.content
+                    buf = io.BytesIO(img_bytes)
+                    buf.name = "image.jpg"
+                    return buf
                 elif resp.status_code in (402, 403):
                     logging.warning(f"Pollinations API Key lacks balance/permission ({resp.status_code}: {resp.text[:120]}). Falling back to public free endpoint.")
-                    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+                    fallback_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+                    fb_resp = await loop.run_in_executor(None, lambda: requests.get(fallback_url, timeout=45))
+                    if fb_resp.status_code == 200:
+                        buf = io.BytesIO(fb_resp.content)
+                        buf.name = "image.jpg"
+                        return buf
+                    return fallback_url
                 else:
                     logging.warning(f"Pollinations returned status {resp.status_code} ({resp.text[:120]}).")
                     return url
@@ -377,8 +386,8 @@ class OpenAIHelper:
                 return url
 
         if 'pollinations' in image_model.lower() or image_model.lower() in ('free', 'flux'):
-            url = await _call_pollinations(prompt)
-            return url, '1024x1024'
+            res = await _call_pollinations(prompt)
+            return res, '1024x1024'
 
         try:
             logging.info(f"Generating image using OpenAI/DALL-E model: '{self.config['image_model']}'")
@@ -401,8 +410,8 @@ class OpenAIHelper:
             return response.data[0].url, self.config['image_size']
         except Exception as e:
             logging.warning(f"OpenAI/DALL-E generation failed ({e}). Falling back to Pollinations.")
-            url = await _call_pollinations(prompt)
-            return url, '1024x1024'
+            res = await _call_pollinations(prompt)
+            return res, '1024x1024'
 
     async def generate_speech(self, text: str) -> tuple[any, int]:
         """

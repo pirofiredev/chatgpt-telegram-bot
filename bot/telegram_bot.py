@@ -711,12 +711,15 @@ class ChatGPTTelegramBot:
         # Automatic plain-text image generation detection
         if self.config.get('enable_image_generation', False):
             img_match = re.match(
-                r'^(?:(?:please\s+)?(?:generate|create)\s+(?:an?\s+)?(?:image|picture|photo)\s+(?:of\s+)?|draw\s+|нарисуй\s+|сгенерируй\s+(?:изображение|картинку|фото)\s+)(.+)$',
+                r'^(?:(?:please\s+)?(?:generate|create)\s+(?:(?:an?\s+)?(?:image|picture|photo)\s+(?:of\s+)?|(?:an?\s+)?)|draw\s+|нарисуй\s+|сгенерируй\s+(?:(?:изображение|картинку|фото)\s+)?)(.+)$',
                 prompt.strip(),
                 re.IGNORECASE
             )
             if img_match:
-                return await self.image(update, context, query=img_match.group(1).strip())
+                candidate = img_match.group(1).strip()
+                # Ensure it's not a general conversation prompt
+                if not re.match(r'^(?:code|text|script|summary|table|list|json|poem|story)\b', candidate, re.IGNORECASE):
+                    return await self.image(update, context, query=candidate)
 
         try:
             total_tokens = 0
