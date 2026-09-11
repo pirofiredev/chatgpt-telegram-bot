@@ -105,7 +105,7 @@ def main():
         'transcription_price': float(os.environ.get('TRANSCRIPTION_PRICE', 0.006)),
         'bot_language': os.environ.get('BOT_LANGUAGE', 'en'),
         'import_modes': os.environ.get('IMPORT_MODES', os.environ.get('IMPORT_MODS', 'false')).lower() == 'true',
-        'modes_file': os.environ.get('MODES_FILE', 'modes.json'),
+        'modes_file': os.environ.get('MODES_FILE', '.modes.json'),
     }
 
     plugin_config = {
