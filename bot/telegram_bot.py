@@ -1140,6 +1140,20 @@ class ChatGPTTelegramBot:
         except Exception as e:
             logging.warning(f"Failed to set Telegram commands: {e}")
 
+        # Connect to Supabase inside the running event loop
+        db_url = os.environ.get('SUPABASE_DB_URL', '').strip()
+        if db_url:
+            try:
+                import asyncpg
+                from memory import CREATE_TABLE_SQL, save_facts, load_facts, extract_facts
+                pool = await asyncpg.create_pool(db_url)
+                async with pool.acquire() as conn:
+                    await conn.execute(CREATE_TABLE_SQL)
+                self.openai.pool = pool
+                logging.info("Connected to Supabase; user_facts table is ready.")
+            except Exception as e:
+                logging.error(f"Failed to connect to Supabase: {e}. Memory features disabled.")
+
     def run(self):
         """
         Runs the bot indefinitely until the user presses Ctrl+C
