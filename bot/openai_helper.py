@@ -336,26 +336,48 @@ class OpenAIHelper:
     async def generate_image(self, prompt: str) -> tuple[str, str]:
         """
         Generates an image from the given prompt.
-        Uses Pollinations.ai if configured or as fallback when no DALL-E provider exists.
-        Supports models like 'flux', 'flux-realism', 'flux-cablyai', 'flux-anime', 'turbo', etc.
+        Uses Pollinations.ai with proper authentication and model verification.
         """
         bot_language = self.config['bot_language']
         image_model = self.config.get('image_model', 'pollinations')
         pollinations_model = self.config.get('pollinations_model', 'flux')
         api_key = self.config.get('pollinations_api_key', None)
 
-        def _build_pollinations_url(p: str) -> str:
+        async def _call_pollinations(p: str) -> str:
             import urllib.parse
-            encoded = urllib.parse.quote(p)
+            import requests
+
+            encoded_prompt = urllib.parse.quote(p)
             encoded_model = urllib.parse.quote(pollinations_model, safe='')
-            url = f"https://image.pollinations.ai/prompt/{encoded}?model={encoded_model}&width=1024&height=1024&enhance=true&nologo=true"
+
+            # Prefer gen.pollinations.ai with Bearer auth when an API key is provided
             if api_key:
-                url += f"&key={api_key}"
-            return url
+                url = f"https://gen.pollinations.ai/image/{encoded_prompt}?model={encoded_model}&width=1024&height=1024&nologo=true"
+                headers = {"Authorization": f"Bearer {api_key}"}
+            else:
+                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model={encoded_model}&width=1024&height=1024&nologo=true"
+                headers = {}
+
+            logging.info(f"Requesting Pollinations generation: model='{pollinations_model}' via {url}")
+            try:
+                loop = asyncio.get_event_loop()
+                resp = await loop.run_in_executor(None, lambda: requests.get(url, headers=headers, timeout=45))
+                actual_model = resp.headers.get('x-model-requested') or resp.headers.get('model') or pollinations_model
+                if resp.status_code == 200:
+                    logging.info(f"Pollinations successfully generated image (Status: 200, Model: '{actual_model}')")
+                    return str(resp.url)
+                elif resp.status_code in (402, 403):
+                    logging.warning(f"Pollinations API Key lacks balance/permission ({resp.status_code}: {resp.text[:120]}). Falling back to public free endpoint.")
+                    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+                else:
+                    logging.warning(f"Pollinations returned status {resp.status_code} ({resp.text[:120]}).")
+                    return url
+            except Exception as e:
+                logging.warning(f"Error querying Pollinations API ({e}), returning direct URL.")
+                return url
 
         if 'pollinations' in image_model.lower() or image_model.lower() in ('free', 'flux'):
-            url = _build_pollinations_url(prompt)
-            logging.info(f"Generating image using Pollinations model: '{pollinations_model}' (URL: {url})")
+            url = await _call_pollinations(prompt)
             return url, '1024x1024'
 
         try:
@@ -378,9 +400,8 @@ class OpenAIHelper:
 
             return response.data[0].url, self.config['image_size']
         except Exception as e:
-            # Fallback to Pollinations
-            url = _build_pollinations_url(prompt)
-            logging.warning(f"Image generation failed with '{self.config['image_model']}' ({e}). Falling back to Pollinations model: '{pollinations_model}'")
+            logging.warning(f"OpenAI/DALL-E generation failed ({e}). Falling back to Pollinations.")
+            url = await _call_pollinations(prompt)
             return url, '1024x1024'
 
     async def generate_speech(self, text: str) -> tuple[any, int]:
