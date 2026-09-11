@@ -259,7 +259,16 @@ class OpenAIHelper:
                 if len(functions) > 0:
                     common_args['functions'] = self.plugin_manager.get_functions_specs()
                     common_args['function_call'] = 'auto'
-            return await self.client.chat.completions.create(**common_args)
+
+            try:
+                return await self.client.chat.completions.create(**common_args)
+            except Exception as e:
+                fallback = self.config.get('fallback_model')
+                if fallback and common_args['model'] != fallback:
+                    logging.warning(f"Primary model {common_args['model']} failed ({e}). Retrying with fallback: {fallback}")
+                    common_args['model'] = fallback
+                    return await self.client.chat.completions.create(**common_args)
+                raise e
 
         except openai.RateLimitError as e:
             raise e
