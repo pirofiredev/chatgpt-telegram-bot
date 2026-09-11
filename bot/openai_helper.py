@@ -335,17 +335,24 @@ class OpenAIHelper:
     async def generate_image(self, prompt: str) -> tuple[str, str]:
         """
         Generates an image from the given prompt.
-        Uses Pollinations.ai (Flux/free) if configured or as fallback when no DALL-E provider exists.
+        Uses Pollinations.ai if configured or as fallback when no DALL-E provider exists.
+        Supports models like 'flux', 'flux-realism', 'flux-cablyai', 'flux-anime', 'turbo', etc.
         """
         bot_language = self.config['bot_language']
         image_model = self.config.get('image_model', 'pollinations')
+        pollinations_model = self.config.get('pollinations_model', 'flux')
+        api_key = self.config.get('pollinations_api_key', None)
+
+        def _build_pollinations_url(p: str) -> str:
+            import urllib.parse
+            encoded = urllib.parse.quote(p)
+            url = f"https://image.pollinations.ai/prompt/{encoded}?model={pollinations_model}&nologo=true"
+            if api_key:
+                url += f"&key={api_key}"
+            return url
 
         if image_model.lower() in ('pollinations', 'free', 'flux'):
-            import urllib.parse
-            encoded_prompt = urllib.parse.quote(prompt)
-            # Free Flux generation via Pollinations
-            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&nologo=true"
-            return image_url, '1024x1024'
+            return _build_pollinations_url(prompt), '1024x1024'
 
         try:
             response = await self.client.images.generate(
@@ -366,11 +373,8 @@ class OpenAIHelper:
 
             return response.data[0].url, self.config['image_size']
         except Exception:
-            # Fallback to free Pollinations if upstream has no image provider
-            import urllib.parse
-            encoded_prompt = urllib.parse.quote(prompt)
-            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&nologo=true"
-            return image_url, '1024x1024'
+            # Fallback to Pollinations
+            return _build_pollinations_url(prompt), '1024x1024'
 
     async def generate_speech(self, text: str) -> tuple[any, int]:
         """
