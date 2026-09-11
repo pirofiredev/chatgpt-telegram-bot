@@ -347,7 +347,7 @@ class OpenAIHelper:
             import urllib.parse
             encoded = urllib.parse.quote(p)
             encoded_model = urllib.parse.quote(pollinations_model, safe='')
-            url = f"https://image.pollinations.ai/prompt/{encoded}?model={encoded_model}&nologo=true"
+            url = f"https://image.pollinations.ai/prompt/{encoded}?model={encoded_model}&width=1024&height=1024&enhance=true&nologo=true"
             if api_key:
                 url += f"&key={api_key}"
             return url
