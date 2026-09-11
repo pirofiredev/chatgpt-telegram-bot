@@ -104,8 +104,6 @@ def main():
         'tts_prices': [float(i) for i in os.environ.get('TTS_PRICES', "0.015,0.030").split(",")],
         'transcription_price': float(os.environ.get('TRANSCRIPTION_PRICE', 0.006)),
         'bot_language': os.environ.get('BOT_LANGUAGE', 'en'),
-        'import_modes': os.environ.get('IMPORT_MODES', os.environ.get('IMPORT_MODS', 'false')).lower() == 'true',
-        'modes_file': os.environ.get('MODES_FILE', '.modes.json'),
     }
 
     plugin_config = {
@@ -116,21 +114,16 @@ def main():
     plugin_manager = PluginManager(config=plugin_config)
     openai_helper = OpenAIHelper(config=openai_config, plugin_manager=plugin_manager)
 
-    # Load custom modes if import_modes is enabled
-    if telegram_config['import_modes']:
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        modes_path = os.path.join(parent_dir, telegram_config['modes_file'])
-        if os.path.exists(modes_path):
-            try:
-                with open(modes_path, 'r', encoding='utf-8') as f:
-                    modes_data = json.load(f)
-                    openai_helper.modes_data = modes_data
-                    telegram_config['modes_data'] = modes_data
-                    logging.info(f"Loaded {len(modes_data)} chat modes from {telegram_config['modes_file']}: {list(modes_data.keys())}")
-            except Exception as e:
-                logging.error(f"Failed to load modes from {modes_path}: {e}")
-        else:
-            logging.warning(f"IMPORT_MODES is true, but modes file not found at {modes_path}")
+    # Load custom modes from MODES_JSON env var
+    modes_json = os.environ.get('MODES_JSON', '').strip()
+    if modes_json:
+        try:
+            modes_data = json.loads(modes_json)
+            openai_helper.modes_data = modes_data
+            telegram_config['modes_data'] = modes_data
+            logging.info(f"Loaded {len(modes_data)} chat modes: {list(modes_data.keys())}")
+        except Exception as e:
+            logging.error(f"Failed to parse MODES_JSON: {e}")
 
     telegram_bot = ChatGPTTelegramBot(config=telegram_config, openai=openai_helper)
     telegram_bot.run()
