@@ -346,12 +346,13 @@ class OpenAIHelper:
         def _build_pollinations_url(p: str) -> str:
             import urllib.parse
             encoded = urllib.parse.quote(p)
-            url = f"https://image.pollinations.ai/prompt/{encoded}?model={pollinations_model}&nologo=true"
+            encoded_model = urllib.parse.quote(pollinations_model, safe='')
+            url = f"https://image.pollinations.ai/prompt/{encoded}?model={encoded_model}&nologo=true"
             if api_key:
                 url += f"&key={api_key}"
             return url
 
-        if image_model.lower() in ('pollinations', 'free', 'flux'):
+        if 'pollinations' in image_model.lower() or image_model.lower() in ('free', 'flux'):
             return _build_pollinations_url(prompt), '1024x1024'
 
         try:

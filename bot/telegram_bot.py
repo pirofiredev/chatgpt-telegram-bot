@@ -6,7 +6,7 @@ import os
 import io
 
 from uuid import uuid4
-from telegram import BotCommandScopeAllGroupChats, Update, constants
+from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault, Update, constants
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle
 from telegram import InputTextMessageContent, BotCommand
 from telegram.error import RetryAfter, TimedOut, BadRequest
@@ -46,8 +46,8 @@ class ChatGPTTelegramBot:
         ]
         # If imaging is enabled, add the "image" and "photo" commands to the list
         if self.config.get('enable_image_generation', False):
-            self.commands.append(BotCommand(command='image', description=localized_text('image_description', bot_language)))
-            self.commands.append(BotCommand(command='photo', description=localized_text('image_description', bot_language)))
+            self.commands.append(BotCommand(command='image', description='Generate an image (e.g. /image gold banana)'))
+            self.commands.append(BotCommand(command='photo', description='Generate a photo (e.g. /photo gold banana)'))
 
         if self.config.get('enable_tts_generation', False):
             self.commands.append(BotCommand(command='tts', description=localized_text('tts_description', bot_language)))
@@ -234,15 +234,15 @@ class ChatGPTTelegramBot:
             text=localized_text('reset_done', self.config['bot_language'])
         )
 
-    async def image(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def image(self, update: Update, context: ContextTypes.DEFAULT_TYPE, query: str = None):
         """
-        Generates an image for the given prompt using DALL·E APIs
+        Generates an image for the given prompt using image generation APIs
         """
         if not self.config['enable_image_generation'] \
                 or not await self.check_allowed_and_within_budget(update, context):
             return
 
-        image_query = message_text(update.message)
+        image_query = query if query is not None else message_text(update.message)
         if image_query == '':
             await update.effective_message.reply_text(
                 message_thread_id=get_thread_id(update),
@@ -707,6 +707,16 @@ class ChatGPTTelegramBot:
             if reply_text:
                 prompt = f'"{reply_text}" {prompt}'
 
+        # Automatic plain-text image generation detection
+        if self.config.get('enable_image_generation', False):
+            img_match = re.match(
+                r'^(?:(?:please\s+)?(?:generate|create)\s+(?:an?\s+)?(?:image|picture|photo)\s+(?:of\s+)?|draw\s+|нарисуй\s+|сгенерируй\s+(?:изображение|картинку|фото)\s+)(.+)$',
+                prompt.strip(),
+                re.IGNORECASE
+            )
+            if img_match:
+                return await self.image(update, context, query=img_match.group(1).strip())
+
         try:
             total_tokens = 0
 
@@ -1069,8 +1079,14 @@ class ChatGPTTelegramBot:
         """
         Post initialization hook for the bot.
         """
-        await application.bot.set_my_commands(self.group_commands, scope=BotCommandScopeAllGroupChats())
-        await application.bot.set_my_commands(self.commands)
+        # Register commands for all scopes to ensure instant autocomplete in Telegram
+        try:
+            await application.bot.set_my_commands(self.commands, scope=BotCommandScopeDefault())
+            await application.bot.set_my_commands(self.commands, scope=BotCommandScopeAllPrivateChats())
+            await application.bot.set_my_commands(self.group_commands, scope=BotCommandScopeAllGroupChats())
+            logging.info("Telegram command autosuggestions successfully registered.")
+        except Exception as e:
+            logging.warning(f"Failed to set Telegram commands: {e}")
 
     def run(self):
         """
