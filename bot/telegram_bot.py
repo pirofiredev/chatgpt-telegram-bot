@@ -1169,6 +1169,12 @@ class ChatGPTTelegramBot:
                     await self.switch_mode(update, context, k)
                 return handler
             application.add_handler(CommandHandler(m_key.lower(), make_handler(m_key)))
+            # Also allow in group chats without prefix requirements
+            application.add_handler(CommandHandler(
+                m_key.lower(),
+                make_handler(m_key),
+                filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP
+            ))
 
         application.add_handler(CommandHandler(
             'chat', self.prompt, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)
