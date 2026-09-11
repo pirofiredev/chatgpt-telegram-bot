@@ -334,11 +334,19 @@ class OpenAIHelper:
 
     async def generate_image(self, prompt: str) -> tuple[str, str]:
         """
-        Generates an image from the given prompt using DALL·E model.
-        :param prompt: The prompt to send to the model
-        :return: The image URL and the image size
+        Generates an image from the given prompt.
+        Uses Pollinations.ai (Flux/free) if configured or as fallback when no DALL-E provider exists.
         """
         bot_language = self.config['bot_language']
+        image_model = self.config.get('image_model', 'pollinations')
+
+        if image_model.lower() in ('pollinations', 'free', 'flux'):
+            import urllib.parse
+            encoded_prompt = urllib.parse.quote(prompt)
+            # Free Flux generation via Pollinations
+            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&nologo=true"
+            return image_url, '1024x1024'
+
         try:
             response = await self.client.images.generate(
                 prompt=prompt,
@@ -357,39 +365,12 @@ class OpenAIHelper:
                 )
 
             return response.data[0].url, self.config['image_size']
-        except Exception as e:
-            raise Exception(f"⚠️ _{localized_text('error', bot_language)}._ ⚠️\n{str(e)}") from e
-
-    async def generate_video(self, prompt: str) -> str:
-        """
-        Generates a video from the given prompt.
-        :param prompt: The prompt to send to the video generation model
-        :return: The video URL
-        """
-        bot_language = self.config['bot_language']
-        model = self.config.get('video_model', 'sora')
-        endpoints = ["/videos/generations", "/video/generations"]
-        last_error = None
-
-        for endpoint in endpoints:
-            try:
-                res = await self.client.post(
-                    endpoint,
-                    body={"prompt": prompt, "model": model},
-                    cast_to=dict
-                )
-                if isinstance(res, dict):
-                    data = res.get("data", [])
-                    if data and isinstance(data, list) and len(data) > 0 and "url" in data[0]:
-                        return data[0]["url"]
-                    if "url" in res:
-                        return res["url"]
-            except Exception as e:
-                last_error = e
-                continue
-
-        error_detail = str(last_error) if last_error else localized_text('try_again', bot_language)
-        raise Exception(f"⚠️ _{localized_text('error', bot_language)}._ ⚠️\n{error_detail}")
+        except Exception:
+            # Fallback to free Pollinations if upstream has no image provider
+            import urllib.parse
+            encoded_prompt = urllib.parse.quote(prompt)
+            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&nologo=true"
+            return image_url, '1024x1024'
 
     async def generate_speech(self, text: str) -> tuple[any, int]:
         """

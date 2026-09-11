@@ -44,13 +44,10 @@ class ChatGPTTelegramBot:
             BotCommand(command='stats', description=localized_text('stats_description', bot_language)),
             BotCommand(command='resend', description=localized_text('resend_description', bot_language))
         ]
-        # If imaging is enabled, add the "image" command to the list
+        # If imaging is enabled, add the "image" and "photo" commands to the list
         if self.config.get('enable_image_generation', False):
             self.commands.append(BotCommand(command='image', description=localized_text('image_description', bot_language)))
             self.commands.append(BotCommand(command='photo', description=localized_text('image_description', bot_language)))
-
-        if self.config.get('enable_video_generation', False):
-            self.commands.append(BotCommand(command='video', description='Generate a video'))
 
         if self.config.get('enable_tts_generation', False):
             self.commands.append(BotCommand(command='tts', description=localized_text('tts_description', bot_language)))
@@ -288,51 +285,6 @@ class ChatGPTTelegramBot:
                 )
 
         await wrap_with_indicator(update, context, _generate, constants.ChatAction.UPLOAD_PHOTO)
-
-    async def video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Generates a video for the given prompt using video generation APIs
-        """
-        if not self.config.get('enable_video_generation', False) \
-                or not await self.check_allowed_and_within_budget(update, context):
-            return
-
-        video_query = message_text(update.message)
-        if video_query == '':
-            await update.effective_message.reply_text(
-                message_thread_id=get_thread_id(update),
-                text="Please provide a prompt for video generation, e.g. `/video a cat running`",
-                parse_mode=constants.ParseMode.MARKDOWN
-            )
-            return
-
-        logging.info(f'New video generation request received from user {update.message.from_user.name} '
-                     f'(id: {update.message.from_user.id})')
-
-        async def _generate():
-            try:
-                video_url = await self.openai.generate_video(prompt=video_query)
-                try:
-                    await update.effective_message.reply_video(
-                        reply_to_message_id=get_reply_to_message_id(self.config, update),
-                        video=video_url
-                    )
-                except Exception:
-                    await update.effective_message.reply_text(
-                        message_thread_id=get_thread_id(update),
-                        reply_to_message_id=get_reply_to_message_id(self.config, update),
-                        text=f"🎥 [Generated Video]({video_url})",
-                        parse_mode=constants.ParseMode.MARKDOWN
-                    )
-            except Exception as e:
-                logging.exception(e)
-                await update.effective_message.reply_text(
-                    message_thread_id=get_thread_id(update),
-                    reply_to_message_id=get_reply_to_message_id(self.config, update),
-                    text=f"⚠️ Video generation failed: {str(e)}"
-                )
-
-        await wrap_with_indicator(update, context, _generate, constants.ChatAction.UPLOAD_VIDEO)
 
     async def tts(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -1136,7 +1088,6 @@ class ChatGPTTelegramBot:
         application.add_handler(CommandHandler('help', self.help))
         application.add_handler(CommandHandler('image', self.image))
         application.add_handler(CommandHandler('photo', self.image))
-        application.add_handler(CommandHandler('video', self.video))
         application.add_handler(CommandHandler('tts', self.tts))
         application.add_handler(CommandHandler('start', self.help))
         application.add_handler(CommandHandler('stats', self.stats))
