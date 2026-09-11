@@ -117,9 +117,10 @@ def is_bot_pinged(config: dict, update: Update, context: ContextTypes.DEFAULT_TY
         content_lower = content.lower()
         if bot_username and f'@{bot_username}' in content_lower:
             return True
-        trigger_keyword = config.get('group_trigger_keyword', '')
-        if trigger_keyword and content_lower.startswith(trigger_keyword.lower()):
-            return True
+        triggers = [k.strip().lower() for k in config.get('group_trigger_keyword', '').split(',') if k.strip()]
+        for kw in triggers:
+            if content_lower.startswith(kw) or f' {kw}' in content_lower:
+                return True
         if content_lower.startswith('/chat'):
             return True
 
@@ -128,16 +129,16 @@ def is_bot_pinged(config: dict, update: Update, context: ContextTypes.DEFAULT_TY
 
 def clean_bot_mention(config: dict, text: str, bot_username: str = '') -> str:
     """
-    Removes bot mention (@bot_username), /chat command, or trigger keyword from the beginning of prompt.
+    Removes bot mention (@bot_username), /chat command, or any trigger keywords.
     """
     if not text:
         return ''
     cleaned = text
     if bot_username:
         cleaned = re.sub(rf'@{re.escape(bot_username)}\b', '', cleaned, flags=re.IGNORECASE).strip()
-    trigger = config.get('group_trigger_keyword', '')
-    if trigger and cleaned.lower().startswith(trigger.lower()):
-        cleaned = cleaned[len(trigger):].strip()
+    triggers = [k.strip() for k in config.get('group_trigger_keyword', '').split(',') if k.strip()]
+    for kw in sorted(triggers, key=len, reverse=True):
+        cleaned = re.sub(rf'^{re.escape(kw)}[\s,:]*', '', cleaned, flags=re.IGNORECASE).strip()
     if cleaned.lower().startswith('/chat'):
         cleaned = cleaned[5:].strip()
     return cleaned
